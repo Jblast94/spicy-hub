@@ -1,0 +1,201 @@
+# Artillery.js Load Testing Configuration for Spicy Hub
+# Run with: artillery run load-test.yml
+
+config:
+  target: 'http://localhost'
+  phases:
+    # Warm-up phase
+    - duration: 60
+      arrivalRate: 1
+      name: "Warm-up"
+    
+    # Ramp-up phase
+    - duration: 120
+      arrivalRate: 1
+      rampTo: 10
+      name: "Ramp-up"
+    
+    # Sustained load phase
+    - duration: 300
+      arrivalRate: 10
+      name: "Sustained load"
+    
+    # Peak load phase
+    - duration: 120
+      arrivalRate: 10
+      rampTo: 50
+      name: "Peak load"
+    
+    # Cool-down phase
+    - duration: 60
+      arrivalRate: 50
+      rampTo: 1
+      name: "Cool-down"
+  
+  # Payload configuration
+  payload:
+    path: "./test-data.csv"
+    fields:
+      - "email"
+      - "password"
+      - "prompt"
+  
+  # Default headers
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      User-Agent: "Artillery Load Test"
+  
+  # Plugins
+  plugins:
+    metrics-by-endpoint:
+      useOnlyRequestNames: true
+    
+  # Performance thresholds
+  ensure:
+    thresholds:
+      - http.response_time.p95: 2000  # 95th percentile response time < 2s
+      - http.response_time.p99: 5000  # 99th percentile response time < 5s
+      - http.request_rate: 45         # At least 45 requests per second
+      - http.codes.200: 95            # At least 95% success rate
+      - http.codes.500: 1             # Less than 1% server errors
+
+scenarios:
+  # Homepage and static content
+  - name: "Browse Homepage"
+    weight: 30
+    flow:
+      - get:
+          url: "/"
+          name: "Homepage"
+      - think: 2
+      - get:
+          url: "/api/health"
+          name: "Health Check"
+  
+  # User registration and authentication
+  - name: "User Registration"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/register"
+          name: "Register User"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+            username: "test_{{ $randomString() }}"
+      - think: 1
+      - post:
+          url: "/api/login"
+          name: "Login User"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.access_token"
+              as: "authToken"
+  
+  # Authenticated user browsing
+  - name: "Authenticated Browsing"
+    weight: 25
+    flow:
+      - post:
+          url: "/api/login"
+          name: "Login"
+          json:
+            email: "test@example.com"
+            password: "testpassword123"
+          capture:
+            - json: "$.access_token"
+              as: "authToken"
+      - think: 1
+      - get:
+          url: "/api/user/profile"
+          name: "Get Profile"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+      - think: 2
+      - get:
+          url: "/api/user/history"
+          name: "Get History"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+      - think: 1
+      - get:
+          url: "/api/user/credits"
+          name: "Get Credits"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+  
+  # Image generation workflow
+  - name: "Image Generation"
+    weight: 20
+    flow:
+      - post:
+          url: "/api/login"
+          name: "Login for Generation"
+          json:
+            email: "test@example.com"
+            password: "testpassword123"
+          capture:
+            - json: "$.access_token"
+              as: "authToken"
+      - think: 2
+      - post:
+          url: "/generate/image"
+          name: "Generate Image"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            prompt: "{{ prompt }}"
+            style: "realistic"
+            nsfw_level: "mild"
+            width: 512
+            height: 512
+          timeout: 30
+      - think: 5
+      - get:
+          url: "/api/user/history"
+          name: "Check Generation History"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+  
+  # Text generation workflow
+  - name: "Text Generation"
+    weight: 15
+    flow:
+      - post:
+          url: "/api/login"
+          name: "Login for Text"
+          json:
+            email: "test@example.com"
+            password: "testpassword123"
+          capture:
+            - json: "$.access_token"
+              as: "authToken"
+      - think: 1
+      - post:
+          url: "/generate/text"
+          name: "Generate Text"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            prompt: "{{ prompt }}"
+            max_length: 200
+            temperature: 0.8
+            nsfw_level: "moderate"
+          timeout: 15
+      - think: 3
+      - get:
+          url: "/api/user/history"
+          name: "Check Text History"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+
+before:
+  flow:
+    - log: "Starting load test for Spicy Hub"
+
+after:
+  flow:
+    - log: "Load test completed"
